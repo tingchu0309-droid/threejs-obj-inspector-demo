@@ -1,16 +1,35 @@
-# React + Vite
+# Three.js CAD Viewer Demo
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A lightweight 3D CAD viewer built with React and Three.js, designed for geometry visualization and interaction in engineering workflows.
 
-Currently, two official plugins are available:
+## Features
+- Load and display 3D models (OBJ format)
+- Interactive camera controls (orbit, zoom, pan)
+- Scene helpers including grid, axes, and lighting
+- Basic geometry visualization for engineering use cases
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Tech Stack
+- React
+- Vite
+- Three.js
 
-## React Compiler
+## Motivation
+This project is inspired by my experience working on industrial software systems involving CAD, geometry processing, and 3D visualization.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+It demonstrates how engineering models can be visualized and interacted with in a web-based environment, similar to real-world applications in automation, layout planning, and engineering design tools.
 
-## Expanding the ESLint configuration
+## What I Learned
+- Integrating Three.js with React for real-time rendering
+- Handling 3D geometry and scene management
+- Building interactive visualization tools for engineering workflows
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Demo
+![CAD Viewer Demo](./combined_demo.png)
+
+
+## How to Run
+```bash
+npm install
+npm run dev
+
+
