@@ -2,243 +2,315 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
+import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'
 import './App.css'
 
-function disposeObject(rootObject) {
-  rootObject.traverse((child) => {
-    if (!child.isMesh) return
+function disposeObject(object) {
+  if (!object) return
 
-    child.geometry?.dispose()
+  object.traverse((child) => {
+    if (child.isMesh) {
+      if (child.geometry) {
+        child.geometry.dispose()
+      }
 
-    if (Array.isArray(child.material)) {
-      child.material.forEach((material) => material.dispose?.())
-      return
+      if (child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach((material) => disposeMaterial(material))
+        } else {
+          disposeMaterial(child.material)
+        }
+      }
     }
-
-    child.material?.dispose?.()
   })
 }
 
-function disposeHelper(helperObject) {
-  if (!helperObject) return
+function disposeMaterial(material) {
+  if (!material) return
 
-  helperObject.geometry?.dispose?.()
-
-  if (Array.isArray(helperObject.material)) {
-    helperObject.material.forEach((material) => material.dispose?.())
-    return
+  for (const key in material) {
+    const value = material[key]
+    if (value && value.isTexture) {
+      value.dispose()
+    }
   }
 
-  helperObject.material?.dispose?.()
+  material.dispose?.()
 }
 
-function getNiceGridSize(value) {
-  const safeValue = Math.max(1, value)
-  const magnitude = 10 ** Math.floor(Math.log10(safeValue))
-  const normalized = safeValue / magnitude
-
-  if (normalized <= 1) return 1 * magnitude
-  if (normalized <= 2) return 2 * magnitude
-  if (normalized <= 5) return 5 * magnitude
-  return 10 * magnitude
+function disposeHelper(helper) {
+  if (!helper) return
+  if (helper.geometry) helper.geometry.dispose()
+  if (helper.material) {
+    if (Array.isArray(helper.material)) {
+      helper.material.forEach((mat) => mat.dispose?.())
+    } else {
+      helper.material.dispose?.()
+    }
+  }
 }
 
-function fitModelToGroundAndCamera(camera, controls, object) {
+function countMeshes(object) {
+  let meshCount = 0
+  object.traverse((child) => {
+    if (child.isMesh) meshCount += 1
+  })
+  return meshCount
+}
+
+function fitCameraToObject(camera, controls, object) {
   const box = new THREE.Box3().setFromObject(object)
-  const center = box.getCenter(new THREE.Vector3())
+
+  if (box.isEmpty()) {
+    throw new Error('OBJ loaded, but no renderable geometry was found.')
+  }
+
   const size = box.getSize(new THREE.Vector3())
-  const maxDimension = Math.max(size.x, size.y, size.z)
+  const center = box.getCenter(new THREE.Vector3())
 
-  object.position.x -= center.x
-  object.position.z -= center.z
-  object.position.y -= box.min.y
+  const maxDim = Math.max(size.x, size.y, size.z, 0.001)
+  const fov = camera.fov * (Math.PI / 180)
+  let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2))
+  cameraZ *= 1.8
 
-  const alignedBox = new THREE.Box3().setFromObject(object)
-  const alignedSize = alignedBox.getSize(new THREE.Vector3())
-  const alignedCenter = alignedBox.getCenter(new THREE.Vector3())
-
-  const fov = THREE.MathUtils.degToRad(camera.fov)
-  const distance = Math.max(2, (maxDimension / (2 * Math.tan(fov / 2))) * 1.5)
-
-  camera.near = Math.max(0.01, distance / 100)
-  camera.far = Math.max(1000, distance * 100)
-  camera.position.set(distance, Math.max(distance * 0.8, alignedSize.y * 1.2), distance)
+  camera.position.set(center.x + cameraZ * 0.8, center.y + cameraZ * 0.6, center.z + cameraZ * 0.8)
+  const cameraDistance = camera.position.distanceTo(center)
+  camera.near = Math.max(cameraDistance / 1000, 0.0001)
+  camera.far = Math.max(cameraDistance * 100, 1000)
   camera.updateProjectionMatrix()
 
-  controls.target.set(0, alignedCenter.y, 0)
+  controls.target.copy(center)
   controls.update()
 
-  return {
-    size: alignedSize,
-    center: alignedCenter,
-  }
+  return { box, size, center }
 }
 
-function updateAdaptiveGrid(scene, gridHelperRef, modelSize) {
-  const footprint = Math.max(modelSize.x, modelSize.z)
-  const desiredGridSize = Math.max(20, footprint * 1.6)
-  const gridSize = getNiceGridSize(desiredGridSize)
-  const divisions = 20
+function createTextureMap(files) {
+  const textureMap = new Map()
 
-  if (gridHelperRef.current) {
-    scene.remove(gridHelperRef.current)
-    disposeHelper(gridHelperRef.current)
+  files.forEach((file) => {
+    const lower = file.name.toLowerCase()
+    if (
+      lower.endsWith('.jpg') ||
+      lower.endsWith('.jpeg') ||
+      lower.endsWith('.png') ||
+      lower.endsWith('.bmp') ||
+      lower.endsWith('.gif') ||
+      lower.endsWith('.webp')
+    ) {
+      textureMap.set(file.name, file)
+      textureMap.set(file.name.toLowerCase(), file)
+    }
+  })
+
+  return textureMap
+}
+
+async function loadObjWithOptionalMtl(files) {
+  const objFile = files.find((file) => file.name.toLowerCase().endsWith('.obj'))
+  const mtlFile = files.find((file) => file.name.toLowerCase().endsWith('.mtl'))
+
+  if (!objFile) {
+    throw new Error('Please select an OBJ file.')
   }
 
-  const nextGridHelper = new THREE.GridHelper(gridSize, divisions, 0x666666, 0x999999)
-  scene.add(nextGridHelper)
-  gridHelperRef.current = nextGridHelper
+  const objText = await objFile.text()
+  const textureMap = createTextureMap(files)
+
+  const loadingManager = new THREE.LoadingManager()
+  const createdObjectUrls = []
+
+  loadingManager.setURLModifier((url) => {
+    const normalized = url.split('/').pop()
+    const textureFile =
+      textureMap.get(url) ||
+      textureMap.get(url.toLowerCase()) ||
+      textureMap.get(normalized) ||
+      textureMap.get(normalized?.toLowerCase())
+
+    if (textureFile) {
+      const objectUrl = URL.createObjectURL(textureFile)
+      createdObjectUrls.push(objectUrl)
+      return objectUrl
+    }
+
+    return url
+  })
+
+  let materials = null
+  let hasMtl = false
+
+  if (mtlFile) {
+    const mtlText = await mtlFile.text()
+    const mtlLoader = new MTLLoader(loadingManager)
+    materials = mtlLoader.parse(mtlText)
+    materials.preload()
+    hasMtl = true
+  }
+
+  const objLoader = new OBJLoader(loadingManager)
+
+  if (materials) {
+    objLoader.setMaterials(materials)
+  }
+
+  const object = objLoader.parse(objText)
+
+  object.traverse((child) => {
+    if (child.isMesh) {
+      child.castShadow = true
+      child.receiveShadow = true
+
+      if (child.geometry && !child.geometry.attributes.normal) {
+        child.geometry.computeVertexNormals()
+      }
+
+      if (child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach((mat) => {
+            if (mat) mat.side = THREE.DoubleSide
+          })
+        } else {
+          child.material.side = THREE.DoubleSide
+        }
+      }
+    }
+  })
 
   return {
-    size: gridSize,
-    divisions,
-    cellSize: gridSize / divisions,
+    object,
+    objFile,
+    hasMtl,
+    textureCount: textureMap.size > 0 ? Math.ceil(textureMap.size / 2) : 0,
+    cleanupUrls: () => {
+      createdObjectUrls.forEach((url) => URL.revokeObjectURL(url))
+    },
   }
 }
 
 function App() {
   const mountRef = useRef(null)
+
   const sceneRef = useRef(null)
   const cameraRef = useRef(null)
+  const rendererRef = useRef(null)
   const controlsRef = useRef(null)
-  const currentModelRef = useRef(null)
+
+  const modelRef = useRef(null)
+  const boxHelperRef = useRef(null)
+  const animationIdRef = useRef(null)
+  const axesHelperRef = useRef(null)
   const gridHelperRef = useRef(null)
-  const loadTokenRef = useRef(0)
+  const modelCleanupRef = useRef(null)
 
-  const [modelFile, setModelFile] = useState(null)
-  const [statusText, setStatusText] = useState('未加载模型，请上传 OBJ / GLTF / GLB / STL 文件')
-  const [gridInfo, setGridInfo] = useState({ size: 20, divisions: 20, cellSize: 1 })
-
-  useEffect(() => {
-    return () => {
-      if (modelFile?.url?.startsWith('blob:')) {
-        URL.revokeObjectURL(modelFile.url)
-      }
-    }
-  }, [modelFile])
-
-  function handleFileChange(event) {
-    const nextFile = event.target.files?.[0]
-    if (!nextFile) return
-
-    const extension = nextFile.name.split('.').pop()?.toLowerCase()
-    const isSupported = extension === 'obj' || extension === 'gltf' || extension === 'glb' || extension === 'stl'
-
-    if (!isSupported) {
-      setStatusText('仅支持 OBJ / GLTF / GLB / STL 文件')
-      event.target.value = ''
-      return
-    }
-
-    setModelFile((previousFile) => {
-      if (previousFile?.url?.startsWith('blob:')) {
-        URL.revokeObjectURL(previousFile.url)
-      }
-
-      return {
-        name: nextFile.name,
-        url: URL.createObjectURL(nextFile),
-      }
-    })
-
-    event.target.value = ''
-  }
+  const [statusText, setStatusText] = useState('Ready')
+  const [modelInfo, setModelInfo] = useState({
+    fileName: '-',
+    hasMtl: false,
+    textureCount: 0,
+    width: 0,
+    height: 0,
+    depth: 0,
+    meshCount: 0,
+  })
 
   useEffect(() => {
     const mountEl = mountRef.current
     if (!mountEl) return
 
-    // 1. scene
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(0xf5f5f5)
+    sceneRef.current = scene
 
-    // 2. camera
     const camera = new THREE.PerspectiveCamera(
       60,
       mountEl.clientWidth / mountEl.clientHeight,
       0.1,
-      1000
+      2000
     )
     camera.position.set(8, 6, 8)
     camera.lookAt(0, 0, 0)
+    cameraRef.current = camera
 
-    // 3. renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true })
     renderer.setSize(mountEl.clientWidth, mountEl.clientHeight)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.shadowMap.enabled = true
     mountEl.appendChild(renderer.domElement)
-        
+    rendererRef.current = renderer
+
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
-    controls.mouseButtons = {
-      LEFT: THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.PAN,
-      RIGHT: null,
-    }
     controls.target.set(0, 1, 0)
     controls.update()
+    controlsRef.current = controls
 
-    // 4. helpers
-    const initialGridHelper = new THREE.GridHelper(20, 20, 0x666666, 0x999999)
-    scene.add(initialGridHelper)
-    gridHelperRef.current = initialGridHelper
+    const gridHelper = new THREE.GridHelper(20, 20)
+    scene.add(gridHelper)
+    gridHelperRef.current = gridHelper
 
     const axesHelper = new THREE.AxesHelper(5)
     scene.add(axesHelper)
+    axesHelperRef.current = axesHelper
 
-    // 5. lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8)
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.9)
     scene.add(ambientLight)
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1)
-    directionalLight.position.set(10, 10, 10)
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2)
+    directionalLight.position.set(10, 12, 8)
+    directionalLight.castShadow = true
     scene.add(directionalLight)
 
-    sceneRef.current = scene
-    cameraRef.current = camera
-    controlsRef.current = controls
-
-    // 7. animate
-    let animationId
     const animate = () => {
       controls.update()
       renderer.render(scene, camera)
-      animationId = requestAnimationFrame(animate)
+      animationIdRef.current = requestAnimationFrame(animate)
     }
     animate()
 
-    // 8. resize
     const handleResize = () => {
-      if (!mountRef.current) return
+      if (!mountRef.current || !cameraRef.current || !rendererRef.current) return
 
       const width = mountRef.current.clientWidth
       const height = mountRef.current.clientHeight
 
-      camera.aspect = width / height
-      camera.updateProjectionMatrix()
-
-      renderer.setSize(width, height)
+      cameraRef.current.aspect = width / height
+      cameraRef.current.updateProjectionMatrix()
+      rendererRef.current.setSize(width, height)
     }
 
     window.addEventListener('resize', handleResize)
 
-    // 9. cleanup
     return () => {
       window.removeEventListener('resize', handleResize)
-      cancelAnimationFrame(animationId)
 
-      if (currentModelRef.current) {
-        scene.remove(currentModelRef.current)
-        disposeObject(currentModelRef.current)
-        currentModelRef.current = null
+      if (animationIdRef.current) {
+        cancelAnimationFrame(animationIdRef.current)
+      }
+
+      if (modelCleanupRef.current) {
+        modelCleanupRef.current()
+        modelCleanupRef.current = null
+      }
+
+      if (modelRef.current) {
+        scene.remove(modelRef.current)
+        disposeObject(modelRef.current)
+        modelRef.current = null
+      }
+
+      if (boxHelperRef.current) {
+        scene.remove(boxHelperRef.current)
+        disposeHelper(boxHelperRef.current)
+        boxHelperRef.current = null
+      }
+
+      if (axesHelperRef.current) {
+        scene.remove(axesHelperRef.current)
       }
 
       if (gridHelperRef.current) {
         scene.remove(gridHelperRef.current)
-        disposeHelper(gridHelperRef.current)
-        gridHelperRef.current = null
       }
 
       controls.dispose()
@@ -247,138 +319,146 @@ function App() {
       if (renderer.domElement && mountEl.contains(renderer.domElement)) {
         mountEl.removeChild(renderer.domElement)
       }
-
-      sceneRef.current = null
-      cameraRef.current = null
-      controlsRef.current = null
     }
   }, [])
 
-  useEffect(() => {
+  const clearCurrentModel = () => {
+    const scene = sceneRef.current
+    if (!scene) return
+
+    if (modelCleanupRef.current) {
+      modelCleanupRef.current()
+      modelCleanupRef.current = null
+    }
+
+    if (modelRef.current) {
+      scene.remove(modelRef.current)
+      disposeObject(modelRef.current)
+      modelRef.current = null
+    }
+
+    if (boxHelperRef.current) {
+      scene.remove(boxHelperRef.current)
+      disposeHelper(boxHelperRef.current)
+      boxHelperRef.current = null
+    }
+  }
+
+  const handleFilesChange = async (event) => {
+    const files = Array.from(event.target.files || [])
+    if (files.length === 0) return
+
     const scene = sceneRef.current
     const camera = cameraRef.current
     const controls = controlsRef.current
 
     if (!scene || !camera || !controls) return
 
-    loadTokenRef.current += 1
-    const loadToken = loadTokenRef.current
+    try {
+      setStatusText('Loading files...')
+      clearCurrentModel()
 
-    if (currentModelRef.current) {
-      scene.remove(currentModelRef.current)
-      disposeObject(currentModelRef.current)
-      currentModelRef.current = null
-    }
-
-    if (!modelFile?.url) {
-      setStatusText('未加载模型，请上传 OBJ / GLTF / GLB / STL 文件')
-      setGridInfo({ size: 20, divisions: 20, cellSize: 1 })
-      return
-    }
-
-    const extension = modelFile.name.split('.').pop()?.toLowerCase()
-    setStatusText(`正在加载: ${modelFile.name}`)
-
-    const onLoadComplete = (loadedObject) => {
-      if (loadToken !== loadTokenRef.current) {
-        disposeObject(loadedObject)
-        return
-      }
+      const result = await loadObjWithOptionalMtl(files)
+      const loadedObject = result.object
 
       scene.add(loadedObject)
-      currentModelRef.current = loadedObject
-      const fitResult = fitModelToGroundAndCamera(camera, controls, loadedObject)
-      const nextGridInfo = updateAdaptiveGrid(scene, gridHelperRef, fitResult.size)
-      setGridInfo(nextGridInfo)
-      setStatusText(`加载成功: ${modelFile.name}`)
+      modelRef.current = loadedObject
+      modelCleanupRef.current = result.cleanupUrls
+
+      const boxHelper = new THREE.BoxHelper(loadedObject, 0xff6600)
+      scene.add(boxHelper)
+      boxHelperRef.current = boxHelper
+
+      const fitResult = fitCameraToObject(camera, controls, loadedObject)
+      const meshCount = countMeshes(loadedObject)
+
+      setModelInfo({
+        fileName: result.objFile.name,
+        hasMtl: result.hasMtl,
+        textureCount: result.textureCount,
+        width: fitResult.size.x,
+        height: fitResult.size.y,
+        depth: fitResult.size.z,
+        meshCount,
+      })
+
+      setStatusText(`Loaded: ${result.objFile.name}`)
+    } catch (error) {
+      console.error(error)
+      setStatusText(error.message || 'Failed to load model.')
+    } finally {
+      event.target.value = ''
     }
-
-    const onError = () => {
-      if (loadToken !== loadTokenRef.current) return
-      setStatusText(`加载失败: ${modelFile.name}`)
-    }
-
-    if (extension === 'obj') {
-      const objLoader = new OBJLoader()
-      objLoader.load(
-        modelFile.url,
-        (obj) => {
-          obj.traverse((child) => {
-            if (!child.isMesh || child.material) return
-            child.material = new THREE.MeshStandardMaterial({ color: 0xb0b7c3 })
-          })
-          onLoadComplete(obj)
-        },
-        undefined,
-        onError,
-      )
-
-      return
-    }
-
-    if (extension === 'gltf' || extension === 'glb') {
-      const gltfLoader = new GLTFLoader()
-      gltfLoader.load(
-        modelFile.url,
-        (gltf) => {
-          onLoadComplete(gltf.scene)
-        },
-        undefined,
-        onError,
-      )
-
-      return
-    }
-
-    if (extension === 'stl') {
-      const stlLoader = new STLLoader()
-      stlLoader.load(
-        modelFile.url,
-        (geometry) => {
-          geometry.computeVertexNormals()
-          const material = new THREE.MeshStandardMaterial({ color: 0xb0b7c3 })
-          const mesh = new THREE.Mesh(geometry, material)
-          onLoadComplete(mesh)
-        },
-        undefined,
-        onError,
-      )
-
-      return
-    }
-
-    setStatusText(`不支持的文件格式: ${modelFile.name}`)
-  }, [modelFile])
+  }
 
   return (
-    <div className="app">
-      <div className="topBar">Three.js OBJ Inspector Demo</div>
-
-      <div className="mainContent">
-        <div className="viewerWrapper">
-          <div ref={mountRef} className="viewer" />
-          <div className="gridBadge">
-            Grid: {gridInfo.size} × {gridInfo.size} | Cell: {gridInfo.cellSize}
-          </div>
+    <div className="appShell">
+      <header className="topBar">
+        <div className="titleBlock">
+          <h1>OBJ Inspector Demo</h1>
+          <p>Upload OBJ + MTL + textures</p>
         </div>
+      </header>
 
-        <div className="sidePanel">
-          <h2>Model Info</h2>
-          <label className="uploadLabel" htmlFor="model-upload">
-            Upload Model
-          </label>
-          <input
-            id="model-upload"
-            className="uploadInput"
-            type="file"
-            accept=".obj,.gltf,.glb,.stl"
-            onChange={handleFileChange}
-          />
-          <p>Status: {statusText}</p>
-          <p>Current File: {modelFile?.name || 'None'}</p>
-          <p>Grid Size: {gridInfo.size} × {gridInfo.size}</p>
-          <p>Cell Size: {gridInfo.cellSize}</p>
-        </div>
+      <div className="mainLayout">
+        <aside className="sidePanel">
+          <section className="panelCard">
+            <h2>Upload</h2>
+            <label className="uploadButton">
+              Select Model Files
+              <input
+                type="file"
+                multiple
+                accept=".obj,.mtl,.png,.jpg,.jpeg,.bmp,.gif,.webp"
+                onChange={handleFilesChange}
+              />
+            </label>
+            <p className="hintText">
+              Select OBJ first, and also include the matching MTL and texture files if the model uses materials.
+            </p>
+          </section>
+
+          <section className="panelCard">
+            <h2>Status</h2>
+            <p>{statusText}</p>
+          </section>
+
+          <section className="panelCard">
+            <h2>Model Info</h2>
+            <div className="infoRow">
+              <span>File Name</span>
+              <span>{modelInfo.fileName}</span>
+            </div>
+            <div className="infoRow">
+              <span>MTL Found</span>
+              <span>{modelInfo.hasMtl ? 'Yes' : 'No'}</span>
+            </div>
+            <div className="infoRow">
+              <span>Texture Count</span>
+              <span>{modelInfo.textureCount}</span>
+            </div>
+            <div className="infoRow">
+              <span>Mesh Count</span>
+              <span>{modelInfo.meshCount}</span>
+            </div>
+            <div className="infoRow">
+              <span>Width</span>
+              <span>{modelInfo.width.toFixed(2)}</span>
+            </div>
+            <div className="infoRow">
+              <span>Height</span>
+              <span>{modelInfo.height.toFixed(2)}</span>
+            </div>
+            <div className="infoRow">
+              <span>Depth</span>
+              <span>{modelInfo.depth.toFixed(2)}</span>
+            </div>
+          </section>
+        </aside>
+
+        <main className="viewerArea">
+          <div ref={mountRef} className="viewerCanvas" />
+        </main>
       </div>
     </div>
   )
