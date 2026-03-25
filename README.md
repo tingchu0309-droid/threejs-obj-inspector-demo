@@ -24,8 +24,9 @@ It demonstrates how engineering models can be visualized and interacted with in 
 - Building interactive visualization tools for engineering workflows
 
 ## Demo
-![CAD Viewer Demo](./objTransformer.jpg)
-![Demo](./platformDemo.gif)
+![CAD Viewer Demo](./public/screenshots/objTransformer.jpg)
+![CAD Viewer Demo](./public/screenshots/objPlatform.jpg)
+
 
 
 ## How to Run
