@@ -228,7 +228,7 @@ function App() {
       0.1,
       2000
     )
-    camera.position.set(8, 6, 8)
+    camera.position.set(5, 5, 20)
     camera.lookAt(0, 0, 0)
     cameraRef.current = camera
 
@@ -241,11 +241,12 @@ function App() {
 
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
-    controls.target.set(0, 1, 0)
+    controls.target.set(0, 0, 0)
     controls.update()
     controlsRef.current = controls
 
     const gridHelper = new THREE.GridHelper(20, 20)
+    gridHelper.rotation.x = Math.PI / 2
     scene.add(gridHelper)
     gridHelperRef.current = gridHelper
 
