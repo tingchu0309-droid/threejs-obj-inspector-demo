@@ -1,12 +1,13 @@
-# Three.js CAD Viewer Demo
+# Three.js OBJ Inspector Demo
 
 A lightweight 3D CAD viewer built with React and Three.js, designed for geometry visualization and interaction in engineering workflows.
 
 ## Features
-- Load and display 3D models (OBJ format)
+- Load and display 3D models (OBJ+MTL format)
 - Interactive camera controls (orbit, zoom, pan)
 - Scene helpers including grid, axes, and lighting
 - Basic geometry visualization for engineering use cases
+- Model inspection workflow for engineering-style 3D review
 
 ## Tech Stack
 - React
@@ -33,5 +34,6 @@ It demonstrates how engineering models can be visualized and interacted with in 
 ```bash
 npm install
 npm run dev
-
+Node.js 18+
+Then open the local Vite URL in your browser
 
