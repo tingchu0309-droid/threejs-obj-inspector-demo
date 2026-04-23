@@ -1,6 +1,7 @@
-# Three.js OBJ Inspector Demo
+# Web-Based 3D Asset Inspection Tool
 
-A lightweight 3D CAD viewer built with React and Three.js, designed for geometry visualization and interaction in engineering workflows.
+A lightweight web-based 3D inspection tool for engineering assets, supporting OBJ/MTL visualization, bounding box analysis, and interactive geometry exploration.
+
 
 ## Features
 - Load and display 3D models (OBJ+MTL format)
